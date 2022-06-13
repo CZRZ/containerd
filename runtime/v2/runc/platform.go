@@ -24,6 +24,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
+	"log/syslog"
 	"net/url"
 	"os"
 	"sync"
@@ -94,6 +96,11 @@ func (p *linuxPlatform) CopyConsole(ctx context.Context, console console.Console
 		return nil, fmt.Errorf("unable to parse stdout uri: %w", err)
 	}
 
+	logwriter, e := syslog.New(syslog.LOG_NOTICE, "myprog")
+	if e == nil {
+		log.SetOutput(logwriter)
+	}
+	log.Printf("stdout in copyconsole is %s, url parse scheme is %s", stdout, uri.Scheme)
 	switch uri.Scheme {
 	case "binary":
 		ns, err := namespaces.NamespaceRequired(ctx)

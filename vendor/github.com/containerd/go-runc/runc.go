@@ -24,6 +24,8 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	loog "log"
+	"log/syslog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -126,6 +128,11 @@ func (o *CreateOpts) args() (out []string, err error) {
 
 // Create creates a new container and returns its pid if it was created successfully
 func (r *Runc) Create(context context.Context, id, bundle string, opts *CreateOpts) error {
+	logwriter, e := syslog.New(syslog.LOG_NOTICE, "myprog")
+	if e == nil {
+		loog.SetOutput(logwriter)
+	}
+
 	args := []string{"create", "--bundle", bundle}
 	if opts != nil {
 		oargs, err := opts.args()
@@ -139,7 +146,6 @@ func (r *Runc) Create(context context.Context, id, bundle string, opts *CreateOp
 		opts.Set(cmd)
 	}
 	cmd.ExtraFiles = opts.ExtraFiles
-
 	if cmd.Stdout == nil && cmd.Stderr == nil {
 		data, err := cmdOutput(cmd, true, nil)
 		defer putBuf(data)

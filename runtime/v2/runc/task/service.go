@@ -445,6 +445,16 @@ func (s *service) Wait(ctx context.Context, r *taskAPI.WaitRequest) (*taskAPI.Wa
 	}, nil
 }
 
+func (s *service) closeExitFifo(e runcC.Exit) {
+	for _, container := range s.containers {
+		if !container.HasPid(e.Pid) {
+			continue
+		}
+
+		container.ExitFd.Close()
+	}
+}
+
 // Connect returns shim information such as the shim's pid
 func (s *service) Connect(ctx context.Context, r *taskAPI.ConnectRequest) (*taskAPI.ConnectResponse, error) {
 	var pid int
@@ -537,7 +547,6 @@ func (s *service) checkProcesses(e runcC.Exit) {
 			if p.Pid() != e.Pid {
 				continue
 			}
-
 			if ip, ok := p.(*process.Init); ok {
 				// Ensure all children are killed
 				if runc.ShouldKillAllOnExit(s.context, container.Bundle) {
@@ -545,6 +554,9 @@ func (s *service) checkProcesses(e runcC.Exit) {
 						logrus.WithError(err).WithField("id", ip.ID()).
 							Error("failed to kill init's children")
 					}
+				}
+				if os.Getenv("EXIT_FIFO_DIR") != "" {
+					s.closeExitFifo(e)
 				}
 			}
 

@@ -23,7 +23,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
+	"log/syslog"
 	"os"
+	"path"
 	"path/filepath"
 	"sync"
 
@@ -39,10 +42,16 @@ import (
 	"github.com/containerd/containerd/runtime/v2/task"
 	"github.com/containerd/typeurl"
 	"github.com/sirupsen/logrus"
+	"golang.org/x/sys/unix"
 )
 
 // NewContainer returns a new runc container
 func NewContainer(ctx context.Context, platform stdio.Platform, r *task.CreateTaskRequest) (_ *Container, retErr error) {
+	logwriter, e := syslog.New(syslog.LOG_NOTICE, "myprog")
+	if e == nil {
+		log.SetOutput(logwriter)
+	}
+
 	ns, err := namespaces.NamespaceRequired(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("create namespace: %w", err)
@@ -132,12 +141,19 @@ func NewContainer(ctx context.Context, platform stdio.Platform, r *task.CreateTa
 	if err := p.Create(ctx, config); err != nil {
 		return nil, errdefs.ToGRPC(err)
 	}
+
+	dir := os.Getenv("EXIT_FIFO_DIR")
+	exitFifo := path.Join(dir, r.ID, "exit_fifo")
+	log.Printf("exit fifo is %s", exitFifo)
+
 	container := &Container{
 		ID:              r.ID,
 		Bundle:          r.Bundle,
 		process:         p,
 		processes:       make(map[string]process.Process),
 		reservedProcess: make(map[string]struct{}),
+
+		exitFifo: exitFifo,
 	}
 	pid := p.Pid()
 	if pid > 0 {
@@ -243,6 +259,9 @@ type Container struct {
 	ID string
 	// Bundle path
 	Bundle string
+
+	exitFifo string
+	ExitFd   *os.File
 
 	// cgroup is either cgroups.Cgroup or *cgroupsv2.Manager
 	cgroup          interface{}
@@ -358,6 +377,17 @@ func (c *Container) Start(ctx context.Context, r *task.StartRequest) (process.Pr
 	if err != nil {
 		return nil, err
 	}
+
+	if _, ok := p.(*process.Init); ok {
+		if os.Getenv("EXIT_FIFO_DIR") != "" {
+			c.ExitFd, err = os.OpenFile(c.exitFifo, unix.O_WRONLY|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
+			logrus.WithError(err).Errorf("process is init, exit fd is %d", c.ExitFd.Fd())
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+
 	if err := p.Start(ctx); err != nil {
 		return nil, err
 	}

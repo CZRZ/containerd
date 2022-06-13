@@ -22,6 +22,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/syslog"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -39,6 +40,8 @@ import (
 	"github.com/containerd/ttrpc"
 	"github.com/gogo/protobuf/proto"
 	"github.com/sirupsen/logrus"
+
+	loog "log"
 )
 
 // Publisher for events
@@ -239,6 +242,11 @@ func RunManager(ctx context.Context, manager Manager, opts ...BinaryOpts) {
 }
 
 func run(ctx context.Context, manager Manager, initFunc Init, name string, config Config) error {
+	logwriter, e := syslog.New(syslog.LOG_NOTICE, "myprog")
+	if e == nil {
+		loog.SetOutput(logwriter)
+	}
+
 	parseFlags()
 	if versionFlag {
 		fmt.Printf("%s:\n", filepath.Base(os.Args[0]))
@@ -273,6 +281,9 @@ func run(ctx context.Context, manager Manager, initFunc Init, name string, confi
 	}
 	defer publisher.Close()
 
+	loog.Printf("ttrpc address and address flag is %s, %s", ttrpcAddress, addressFlag)
+	loog.Printf("namespace flag is %s", namespaceFlag)
+	loog.Printf("is manager nil? %t", manager == nil)
 	ctx = namespaces.WithNamespace(ctx, namespaceFlag)
 	ctx = context.WithValue(ctx, OptsKey{}, Opts{BundlePath: bundlePath, Debug: debugFlag})
 	ctx, sd := shutdown.WithShutdown(ctx)
@@ -298,6 +309,8 @@ func run(ctx context.Context, manager Manager, initFunc Init, name string, confi
 			name: name,
 		}
 	}
+
+	loog.Printf("action is %s", action)
 
 	// Handle explicit actions
 	switch action {
@@ -330,6 +343,8 @@ func run(ctx context.Context, manager Manager, initFunc Init, name string, confi
 			TTRPCAddress:     ttrpcAddress,
 		}
 
+		loog.Printf("start options are %s %s %s", containerdBinaryFlag, addressFlag, ttrpcAddress)
+
 		address, err := manager.Start(ctx, id, opts)
 		if err != nil {
 			return err
@@ -337,16 +352,21 @@ func run(ctx context.Context, manager Manager, initFunc Init, name string, confi
 		if _, err := os.Stdout.WriteString(address); err != nil {
 			return err
 		}
+		loog.Print("start accomplished")
 		return nil
 	}
+
+	loog.Print("action is not delete or start")
 
 	if !config.NoSetupLogger {
 		ctx, err = setLogger(ctx, id)
 		if err != nil {
+			loog.Printf("log setup error: %s", err.Error())
 			return err
 		}
 	}
 
+	loog.Print("plugins registering")
 	plugin.Register(&plugin.Registration{
 		Type: plugin.InternalPlugin,
 		ID:   "shutdown",
@@ -372,7 +392,7 @@ func run(ctx context.Context, manager Manager, initFunc Init, name string, confi
 	for _, p := range plugins {
 		id := p.URI()
 		log.G(ctx).WithField("type", p.Type).Infof("loading plugin %q...", id)
-
+		loog.Printf("loading plugin %q...", id)
 		initContext := plugin.NewContext(
 			ctx,
 			p,
@@ -420,21 +440,25 @@ func run(ctx context.Context, manager Manager, initFunc Init, name string, confi
 
 	server, err := newServer()
 	if err != nil {
+		loog.Print("failed creating server")
 		return fmt.Errorf("failed creating server: %w", err)
 	}
 
 	for _, srv := range ttrpcServices {
 		if err := srv.RegisterTTRPC(server); err != nil {
+			loog.Print("failed to register service")
+
 			return fmt.Errorf("failed to register service: %w", err)
 		}
 	}
 
 	if err := serve(ctx, server, signals, sd.Shutdown); err != nil {
+		loog.Printf("server err is %s", err.Error())
+
 		if err != shutdown.ErrShutdown {
 			return err
 		}
 	}
-
 	// NOTE: If the shim server is down(like oom killer), the address
 	// socket might be leaking.
 	if address, err := ReadAddress("address"); err == nil {
@@ -461,6 +485,7 @@ func serve(ctx context.Context, server *ttrpc.Server, signals chan os.Signal, sh
 	}
 
 	l, err := serveListener(socketFlag)
+	loog.Printf("socket flag is %s", socketFlag)
 	if err != nil {
 		return err
 	}
@@ -471,6 +496,9 @@ func serve(ctx context.Context, server *ttrpc.Server, signals chan os.Signal, sh
 			log.G(ctx).WithError(err).Fatal("containerd-shim: ttrpc server failure")
 		}
 	}()
+
+	loog.Printf("after serve()")
+
 	logger := log.G(ctx).WithFields(logrus.Fields{
 		"pid":       os.Getpid(),
 		"path":      path,
@@ -481,8 +509,11 @@ func serve(ctx context.Context, server *ttrpc.Server, signals chan os.Signal, sh
 			dumpStacks(logger)
 		}
 	}()
+	loog.Printf("before handle exit")
 
 	go handleExitSignals(ctx, logger, shutdown)
+	loog.Printf("before reap")
+
 	return reap(ctx, logger, signals)
 }
 

@@ -21,6 +21,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	loog "log"
+	"log/syslog"
 	"os"
 	"path/filepath"
 	goruntime "runtime"
@@ -118,6 +120,10 @@ func (manager) Start(ctx context.Context, id string, opts shim.StartOpts) (_ str
 	if err != nil {
 		return "", err
 	}
+	logwriter, e := syslog.New(syslog.LOG_NOTICE, "manager_linux")
+	if e == nil {
+		loog.SetOutput(logwriter)
+	}
 	grouping := id
 	spec, err := readSpec()
 	if err != nil {
@@ -133,6 +139,7 @@ func (manager) Start(ctx context.Context, id string, opts shim.StartOpts) (_ str
 	if err != nil {
 		return "", err
 	}
+	loog.Print("new command accomplished")
 
 	socket, err := shim.NewSocket(address)
 	if err != nil {
@@ -196,7 +203,9 @@ func (manager) Start(ctx context.Context, id string, opts shim.StartOpts) (_ str
 	}()
 	// make sure to wait after start
 	go cmd.Wait()
+	loog.Print("the wait ends")
 	if data, err := io.ReadAll(os.Stdin); err == nil {
+		loog.Printf("length of data is %d", len(data))
 		if len(data) > 0 {
 			var any ptypes.Any
 			if err := proto.Unmarshal(data, &any); err != nil {

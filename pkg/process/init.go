@@ -30,6 +30,9 @@ import (
 	"sync"
 	"time"
 
+	loog "log"
+	"log/syslog"
+
 	"github.com/containerd/console"
 	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/mount"
@@ -116,6 +119,13 @@ func (p *Init) Create(ctx context.Context, r *CreateConfig) error {
 		pidFile = newPidFile(p.Bundle)
 	)
 
+	logwriter, e := syslog.New(syslog.LOG_NOTICE, "myprog")
+	if e == nil {
+		loog.SetOutput(logwriter)
+	}
+
+	loog.Printf("input stdio is %s, %s, %s", r.Stdin, r.Stdout, r.Stderr)
+	loog.Printf("is r terminal ? %t", r.Terminal)
 	if r.Terminal {
 		if socket, err = runc.NewTempConsoleSocket(); err != nil {
 			return fmt.Errorf("failed to create OCI runtime console socket: %w", err)
@@ -123,6 +133,7 @@ func (p *Init) Create(ctx context.Context, r *CreateConfig) error {
 		defer socket.Close()
 	} else {
 		if pio, err = createIO(ctx, p.id, p.IoUID, p.IoGID, p.stdio); err != nil {
+			loog.Printf("create io failed, p.stdio is null? %t", p.stdio.IsNull())
 			return fmt.Errorf("failed to create init process I/O: %w", err)
 		}
 		p.io = pio
@@ -142,6 +153,7 @@ func (p *Init) Create(ctx context.Context, r *CreateConfig) error {
 		opts.ConsoleSocket = socket
 	}
 	if err := p.runtime.Create(ctx, r.ID, r.Bundle, opts); err != nil {
+		loog.Printf("failt to create %s, bundle is %s", err.Error(), r.Bundle)
 		return p.runtimeError(err, "OCI runtime create failed")
 	}
 	if r.Stdin != "" {
@@ -158,6 +170,7 @@ func (p *Init) Create(ctx context.Context, r *CreateConfig) error {
 		}
 		console, err = p.Platform.CopyConsole(ctx, console, p.id, r.Stdin, r.Stdout, r.Stderr, &p.wg)
 		if err != nil {
+			loog.Printf("fail to start console copy %s", err.Error())
 			return fmt.Errorf("failed to start console copy: %w", err)
 		}
 		p.console = console

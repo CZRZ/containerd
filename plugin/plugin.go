@@ -19,6 +19,8 @@ package plugin
 import (
 	"errors"
 	"fmt"
+	"log"
+	"log/syslog"
 	"sync"
 )
 
@@ -146,6 +148,11 @@ func Load(path string) (err error) {
 
 // Register allows plugins to register
 func Register(r *Registration) {
+	logwriter, e := syslog.New(syslog.LOG_NOTICE, "myprog")
+	if e == nil {
+		log.SetOutput(logwriter)
+	}
+	log.Printf("resigtering %s", r.ID)
 	register.Lock()
 	defer register.Unlock()
 
